@@ -3,7 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <title>Crypto Live Chart</title>
+    <!-- Chart.js v4 -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Plotly.js for heatmap -->
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+
+    <!-- Luxon for time axes -->
     <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
     <style>
@@ -62,7 +68,7 @@
 <body>
     <div class="tabs" style="display:flex;gap:2rem;justify-content:center;margin-top:32px;">
         <button id="tab-charts" class="tab-btn active" style="padding:10px 32px;border-radius:8px 8px 0 0;background:#23272f;color:#f0b90b;border:none;font-size:1.1rem;cursor:pointer;">Live Charts</button>
-        <button id="tab-other" class="tab-btn" style="padding:10px 32px;border-radius:8px 8px 0 0;background:#181a20;color:#eaecef;border:none;font-size:1.1rem;cursor:pointer;">1 Hour + Detrended</button>
+        <button id="tab-other" class="tab-btn" style="padding:10px 32px;border-radius:8px 8px 0 0;background:#181a20;color:#eaecef;border:none;font-size:1.1rem;cursor:pointer;">Coherence</button>
     </div>
     <div id="tab-content-charts">
         <div class="chart-container">
@@ -109,7 +115,7 @@
         </div>
         <div class="chart-container">
             <h2 style="color:#f0b90b;text-align:center;margin-top:0;margin-bottom:12px;font-weight:normal;">Wavelet Coherence (BTC/ETH, Last 1 Hour)</h2>
-            <canvas id="waveletCoherenceChart" style="max-width:100%;max-height:400px;display:block;margin:0 auto;background:#181a20;"></canvas>
+            <div id="waveletCoherencePlot" style="max-width:100%;max-height:400px;display:block;margin:0 auto;background:#181a20;border-radius:18px;overflow:hidden;"></div>
             <div id="coherenceColorbar" style="width:100%;margin-top:8px;text-align:center;"></div>
         </div>
     </div>
@@ -208,6 +214,8 @@ async function updateChart1h() {
         cryptoChart1hDetrended.data.datasets[1].data = ethDetrended;
         cryptoChart1hDetrended.update('active'); // Animate y-ticks
     }
+    // Also update coherence plot every time updateChart1h runs
+    fetchAndPlotCoherence();
 }
 let lastBTC = [];
 let lastETH = [];
@@ -266,6 +274,7 @@ function createChart(ctx, btcData, ethData, is60s = false) {
                     borderColor: 'orange',
                     backgroundColor: 'rgba(255,165,0,0.1)',
                     pointRadius: 0,
+                    pointHoverRadius: 5,
                     borderWidth: 2,
                     tension: 0.1
                 },
@@ -275,6 +284,7 @@ function createChart(ctx, btcData, ethData, is60s = false) {
                     borderColor: '#3498db',
                     backgroundColor: 'rgba(52,152,219,0.1)',
                     pointRadius: 0,
+                    pointHoverRadius: 5,
                     borderWidth: 2,
                     tension: 0.1
                 }
@@ -286,10 +296,22 @@ function createChart(ctx, btcData, ethData, is60s = false) {
                 easing: 'easeInOutCubic',
                 animateScale: true,
                 animateRotate: true,
+                animations: {
+                    y: {
+                        type: 'number',
+                        duration: 1200,
+                        easing: 'easeInOutCubic',
+                    },
+                    yTick: {
+                        type: 'number',
+                        duration: 1200,
+                        easing: 'easeInOutCubic',
+                    }
+                }
             },
             transitions: {
-                show: { animations: { x: {duration: 1200}, y: {duration: 1200} } },
-                hide: { animations: { x: {duration: 1200}, y: {duration: 1200} } }
+                show: { animations: { x: {duration: 1200}, y: {duration: 1200}, yTick: {duration: 1200} } },
+                hide: { animations: { x: {duration: 1200}, y: {duration: 1200}, yTick: {duration: 1200} } }
             },
             plugins: {
                 legend: {
@@ -441,6 +463,10 @@ async function updateChart() {
     }
     let minY60 = Math.min(...btc60.prices, ...eth60.prices);
     let maxY60 = Math.max(...btc60.prices, ...eth60.prices);
+    // Add a conservative margin (e.g., 10% of the range or at least 0.05)
+    let margin = Math.max(0.05, 0.1 * (maxY60 - minY60));
+    minY60 -= margin;
+    maxY60 += margin;
     if (cryptoChart60.options.scales.y._lastMin !== undefined) {
         minY60 = cryptoChart60.options.scales.y._lastMin + (minY60 - cryptoChart60.options.scales.y._lastMin) * SMOOTH_FACTOR;
         maxY60 = cryptoChart60.options.scales.y._lastMax + (maxY60 - cryptoChart60.options.scales.y._lastMax) * SMOOTH_FACTOR;
@@ -487,7 +513,7 @@ window.onload = async function() {
     const eth1hArr = sliceLast1h(eth);
     const btc1h = formatData(btc1hArr);
     const eth1h = formatData(eth1hArr);
-    // 1h chart with no hover circles
+    // 1h chart with NO circles at all
     cryptoChart1h = new Chart(document.getElementById('cryptoChart1h').getContext('2d'), {
         type: 'line',
         data: {
@@ -499,6 +525,7 @@ window.onload = async function() {
                     borderColor: 'orange',
                     backgroundColor: 'rgba(255,165,0,0.1)',
                     pointRadius: 0,
+                    pointHoverRadius: 0,
                     borderWidth: 2,
                     tension: 0.1
                 },
@@ -508,6 +535,7 @@ window.onload = async function() {
                     borderColor: '#3498db',
                     backgroundColor: 'rgba(52,152,219,0.1)',
                     pointRadius: 0,
+                    pointHoverRadius: 0,
                     borderWidth: 2,
                     tension: 0.1
                 }
@@ -568,7 +596,7 @@ window.onload = async function() {
             }
         }
     });
-    // Detrended 1h chart with no hover circles
+    // Detrended 1h chart with NO circles at all
     const btcDetrended = detrend(btc1h.prices);
     const ethDetrended = detrend(eth1h.prices);
     cryptoChart1hDetrended = new Chart(document.getElementById('cryptoChart1hDetrended').getContext('2d'), {
@@ -582,6 +610,7 @@ window.onload = async function() {
                     borderColor: 'orange',
                     backgroundColor: 'rgba(255,165,0,0.1)',
                     pointRadius: 0,
+                    pointHoverRadius: 0,
                     borderWidth: 2,
                     tension: 0.1
                 },
@@ -591,6 +620,7 @@ window.onload = async function() {
                     borderColor: '#3498db',
                     backgroundColor: 'rgba(52,152,219,0.1)',
                     pointRadius: 0,
+                    pointHoverRadius: 0,
                     borderWidth: 2,
                     tension: 0.1
                 }
@@ -652,123 +682,141 @@ window.onload = async function() {
         }
     });
 
-    // --- Auto-update all charts every 3s ---
-    setInterval(updateChart, 3000);
-    setInterval(updateChart1h, 3000);
-
-    // --- Auto-update coherence plot every 3s using Chart.js matrix chart ---
-    let waveletCoherenceChart = null;
-    function viridisColor(val) {
-        var stops = [
-            [68,1,84],[71,44,122],[59,81,139],[44,113,142],[33,144,141],
-            [39,173,129],[92,200,99],[170,220,50],[253,231,37]
-        ];
-        var idx = Math.max(0, Math.min(stops.length-2, Math.floor(val*(stops.length-1))));
-        var t = val*(stops.length-1)-idx;
-        var c0 = stops[idx], c1 = stops[idx+1];
-        var r = Math.round(c0[0]+(c1[0]-c0[0])*t);
-        var g = Math.round(c0[1]+(c1[1]-c0[1])*t);
-        var b = Math.round(c0[2]+(c1[2]-c0[2])*t);
-        return 'rgb(' + r + ',' + g + ',' + b + ')';
-    }
-    function fetchAndPlotCoherence() {
-        fetch('/api/wavelet_coherence')
-            .then(function(res) {
-                if (!res.ok) throw new Error('Failed to fetch wavelet coherence');
-                return res.json();
-            })
-            .then(function(data) {
-                var coherence = data.coherence;
-                var freqs = data.freqs;
-                if (!Array.isArray(coherence) || !Array.isArray(freqs)) return;
-                if (!window.ChartMatrixRegistered) {
-                    var script = document.createElement('script');
-                    script.src = 'https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@4.1.0/dist/chartjs-chart-matrix.umd.min.js';
-                    script.onload = function() { window.ChartMatrixRegistered = true; fetchAndPlotCoherence(); };
-                    document.head.appendChild(script);
-                    return;
-                }
-                var matrixData = [];
-                var nFreq = freqs.length;
-                var nTime = coherence[0].length;
-                for (var i = 0; i < nFreq; ++i) {
-                    for (var j = 0; j < nTime; ++j) {
-                        matrixData.push({
-                            x: j,
-                            y: nFreq - 1 - i,
-                            v: coherence[i][j]
-                        });
-                    }
-                }
-                if (waveletCoherenceChart) waveletCoherenceChart.destroy();
-                var ctx = document.getElementById('waveletCoherenceChart').getContext('2d');
-                waveletCoherenceChart = new Chart(ctx, {
-                    type: 'matrix',
-                    data: {
-                        datasets: [{
-                            label: 'Wavelet Coherence',
-                            data: matrixData,
-                            backgroundColor: function(ctx) { return viridisColor(ctx.raw.v); },
-                            width: function(obj) { return obj.chart.chartArea ? obj.chart.chartArea.width / nTime : 4; },
-                            height: function(obj) { return obj.chart.chartArea ? obj.chart.chartArea.height / nFreq : 4; },
-                            borderWidth: 0
-                        }]
-                    },
-                    options: {
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                callbacks: {
-                                    title: function() { return ''; },
-                                    label: function(ctx) { return 'Coherence: ' + ctx.raw.v.toFixed(2) + '\nPeriod: ' + (1/freqs[nFreq-1-ctx.raw.y]).toFixed(2) + 's'; }
-                                },
-                                backgroundColor: '#23272f',
-                                bodyColor: '#eaecef',
-                            }
-                        },
-                        scales: {
-                            x: {
-                                display: false,
-                                min: 0,
-                                max: nTime-1
-                            },
-                            y: {
-                                display: true,
-                                min: 0,
-                                max: nFreq-1,
-                                ticks: {
-                                    color: '#eaecef',
-                                    callback: function(v) { return (1/freqs[nFreq-1-v]).toFixed(2)+'s'; },
-                                    maxTicksLimit: 8
-                                },
-                                grid: { color: '#23272f' }
-                            }
-                        }
-                    }
-                });
-                var colorbar = document.getElementById('coherenceColorbar');
-                colorbar.innerHTML = '';
-                var bar = document.createElement('canvas');
-                bar.width = 300; bar.height = 24;
-                colorbar.appendChild(bar);
-                var bctx = bar.getContext('2d');
-                for (var i = 0; i < 300; ++i) {
-                    bctx.fillStyle = viridisColor(i/299);
-                    bctx.fillRect(i,0,1,24);
-                }
-                bctx.font = '14px Arial';
-                bctx.fillStyle = '#eaecef';
-                bctx.fillText('0',0,20);
-                bctx.fillText('1',290,20);
-                bctx.fillText('Coherence',120,12);
-            })
-            .catch(function(err) {
-                console.error('Wavelet coherence fetch/plot error:', err);
-            });
-    }
+    // --- Auto-update all charts every 0.1s ---
+    setInterval(updateChart, 1000);
+    setInterval(updateChart1h, 10000);
     fetchAndPlotCoherence();
-    setInterval(fetchAndPlotCoherence, 3000);
+    setInterval(fetchAndPlotCoherence, 30000);
 };
+
+// --- Make fetchAndPlotCoherence globally accessible ---
+let waveletCoherenceChart = null;
+function viridisColor(val) {
+    var stops = [
+        [68,1,84],[71,44,122],[59,81,139],[44,113,142],[33,144,141],
+        [39,173,129],[92,200,99],[170,220,50],[253,231,37]
+    ];
+    var idx = Math.max(0, Math.min(stops.length-2, Math.floor(val*(stops.length-1))));
+    var t = val*(stops.length-1)-idx;
+    var c0 = stops[idx], c1 = stops[idx+1];
+    var r = Math.round(c0[0]+(c1[0]-c0[0])*t);
+    var g = Math.round(c0[1]+(c1[1]-c0[1])*t);
+    var b = Math.round(c0[2]+(c1[2]-c0[2])*t);
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+}
+async function fetchAndPlotCoherence() {
+    console.log('[frontend] fetchAndPlotCoherence called at', new Date().toLocaleTimeString());
+    const plotDiv = document.getElementById('waveletCoherencePlot');
+    let res = await fetch('/api/wavelet_coherence');
+    if (!res.ok) {
+        plotDiv.innerHTML = '<div style="color:#f0b90b;text-align:center;font-size:1.2rem;padding:2em;">Coherence fetch error</div>';
+        return;
+    }
+    let data = await res.json();
+    if (!data || !data.coherence || !data.freqs || !data.periods || !data.phase) {
+        plotDiv.innerHTML = '<div style="color:#f0b90b;text-align:center;font-size:1.2rem;padding:2em;">Invalid coherence data</div>';
+        return;
+    }
+    const coherence = data.coherence;
+    const periods = data.periods;
+    const phase = data.phase;
+    const nFreq = periods.length;
+    const nTime = coherence[0].length;
+    // Restrict periods to between 40 and 5 seconds
+    let periodMask = periods.map(p => p >= 5 && p <= 40);
+    let filteredPeriods = [];
+    let filteredCoherence = [];
+    let filteredPhase = [];
+    for (let i = 0; i < nFreq; ++i) {
+        if (periodMask[i]) {
+            filteredPeriods.push(periods[i]);
+            filteredCoherence.push(coherence[i]);
+            filteredPhase.push(phase[i]);
+        }
+    }
+    // Plotly expects z as [y][x], so flip vertically for periods
+    const z = filteredCoherence.slice().reverse();
+    const phaseArr = filteredPhase.slice().reverse();
+    const yLabels = filteredPeriods.slice().reverse().map(p => p.toFixed(2) + 's');
+    const xLabels = Array.from({length: nTime}, (_, i) => i);
+
+    // Phase arrows temporarily disabled
+    // let arrowX = [], arrowY = [], u = [], v = [];
+    // const arrowSpacingY = Math.max(1, Math.floor(z.length / 24));
+    // const arrowSpacingX = Math.max(1, Math.floor(nTime / 48));
+    // for (let i = 0; i < z.length; i += arrowSpacingY) {
+    //     for (let j = 0; j < nTime; j += arrowSpacingX) {
+    //         if (z[i][j] > 0.7) {
+    //             arrowX.push(j);
+    //             arrowY.push(yLabels[i]);
+    //             const angle = phaseArr[i][j];
+    //             const mag = 1.2 * z[i][j];
+    //             u.push(mag * Math.cos(angle));
+    //             v.push(mag * Math.sin(angle));
+    //         }
+    //     }
+    // }
+
+    // Matplotlib 'turbo' colormap
+    const turboColorscale = [
+        [0.0, 'rgb(48,18,59)'],
+        [0.1, 'rgb(50,70,167)'],
+        [0.2, 'rgb(38,131,229)'],
+        [0.3, 'rgb(36,193,196)'],
+        [0.4, 'rgb(68,234,128)'],
+        [0.5, 'rgb(165,246,62)'],
+        [0.6, 'rgb(255,229,57)'],
+        [0.7, 'rgb(255,170,0)'],
+        [0.8, 'rgb(255,89,0)'],
+        [0.9, 'rgb(204,19,0)'],
+        [1.0, 'rgb(84,0,0)']
+    ];
+    const heatmapTrace = {
+        z: z,
+        x: xLabels,
+        y: yLabels,
+        type: 'heatmap',
+        colorscale: turboColorscale,
+        zmin: 0,
+        zmax: 1,
+        colorbar: {
+            title: 'Coherence',
+            titleside: 'right',
+            tickvals: [0, 0.25, 0.5, 0.75, 1],
+            ticktext: ['0', '0.25', '0.5', '0.75', '1'],
+            thickness: 16,
+            len: 0.8,
+            outlinewidth: 0,
+            x: 1.02
+        },
+        showscale: true
+    };
+    // No arrowSegments when arrows are disabled
+    let arrowSegments = [];
+
+    Plotly.newPlot(plotDiv, [heatmapTrace], {
+        margin: { t: 30, l: 60, r: 30, b: 40 },
+        xaxis: { title: 'Time', showgrid: false, zeroline: false, showticklabels: false },
+        yaxis: { title: 'Period (s)', showgrid: false, zeroline: false, tickfont: { color: '#eaecef' }, titlefont: { color: '#eaecef' } },
+        plot_bgcolor: '#181a20',
+        paper_bgcolor: '#181a20',
+        font: { color: '#eaecef', family: 'Arial, sans-serif' },
+        height: 340,
+        width: null,
+        responsive: true,
+        shapes: [], // No arrows
+        // Add rounded corners via CSS, but ensure Plotly's SVG doesn't overflow
+    }, {displayModeBar: false});
+    // Colorbar label (optional, since Plotly has its own)
+    let colorbar = document.getElementById('coherenceColorbar');
+    colorbar.innerHTML = '';
+}
     </script>
-</body>
+    <style>
+    #waveletCoherencePlot {
+        border-radius: 32px !important;
+        overflow: hidden;
+    }
+    </style>
 </html>
+

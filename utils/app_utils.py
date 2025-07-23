@@ -39,7 +39,7 @@ def coherence(coeffs1, coeffs2, freqs):
     S1 = np.abs(coeffs1) ** 2
     S2 = np.abs(coeffs2) ** 2
     S12 = coeffs1 * np.conj(coeffs2)
-    def smooth(data, sigma=(2, 2), mode='nearest'):
+    def smooth(data, sigma=(1, 1), mode='nearest'):
         return gaussian_filter(data, sigma=sigma, mode=mode)
     S1_smooth = smooth(S1)
     S2_smooth = smooth(S2)

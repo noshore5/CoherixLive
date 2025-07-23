@@ -21,19 +21,15 @@ def plot_coherence(signal1, signal2, fs, highest=0.5, lowest=0.01):
 
     coeffs1, freqs = transform(signal1, fs, highest, lowest)
     coeffs2, _ = transform(signal2, fs, highest, lowest)
-    try:
-        from coherence_cy import coherence_cy
-        coh, freqs, S12 = coherence_cy(coeffs1.astype(np.complex128), coeffs2.astype(np.complex128), freqs.astype(np.float64))
-    except ImportError:
-        print("Cython module 'coherence_cy' not found. Falling back to Python version.")
-        # fallback to Python version if Cython module not built
-        coh, freqs, S12 = coherence(coeffs1, coeffs2, freqs)
+    # Always use the Python version for now (no Cython)
+    coh, freqs, S12 = coherence(coeffs1, coeffs2, freqs)
 
     # Convert frequencies to periods (avoid division by zero)
     periods = np.where(freqs > 0, 1.0 / freqs, np.nan)
     X, Y = np.meshgrid(np.arange(signal1.shape[0]), periods)
 
     # No plotting here. Return data for frontend plotting.
+    # NOTE: To ensure the coherence plot matches the detrended plot, call this function with the exact detrended arrays used in the frontend.
     return {
         'coherence': coh.tolist(),
         'freqs': freqs.tolist(),

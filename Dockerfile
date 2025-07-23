@@ -29,5 +29,5 @@ COPY . .
 # Expose the port uvicorn will run on
 EXPOSE 8000
 
-# Start FastAPI with uvicorn
-CMD ["uvicorn", "fastapp:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start FastAPI with gunicorn and multiple uvicorn workers for better performance
+CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "app:app", "--bind", "0.0.0.0:8000"]

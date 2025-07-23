@@ -30,4 +30,4 @@ COPY . .
 EXPOSE 8000
 
 # Start FastAPI with gunicorn and multiple uvicorn workers for better performance
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "app:app", "--bind", "0.0.0.0:8000"]
+CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "app:app", "--bind", "0.0.0.0:8000"]

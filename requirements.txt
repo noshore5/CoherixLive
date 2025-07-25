@@ -8,3 +8,4 @@ plotly
 fcwt
 matplotlib
 websockets
+finnhub

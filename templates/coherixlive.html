@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Wavelet Coherence Analysis</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <style>
+        body { background: #181818; color: #cccccc; font-family: 'Segoe UI', Arial, sans-serif; }
+        .container { max-width: 900px; margin: 40px auto; }
+        .card { background: #232323; color: #cccccc; border: 1px solid #444; }
+        .plot-container { margin-bottom: 2rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card shadow p-4">
+            <h2 class="mb-4 text-center">Wavelet Coherence Analysis</h2>
+            <div class="plot-container">
+                <h4 class="text-center mb-3">Last 60 Seconds</h4>
+                <div id="live-chart-60s" style="height: 400px;"></div>
+            </div>
+            <div class="plot-container">
+                <h4 class="text-center mb-3">Detrended Data</h4>
+                <div id="detrended-chart-60s" style="height: 400px;"></div>
+            </div>
+            <div class="plot-container">
+                <h4 class="text-center mb-3">Wavelet Coherence</h4>
+                <div id="coherence-plot-60s" style="height: 400px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentData = null;
+        
+        async function fetchData() {
+            const response = await fetch('/api/live-data');
+            return await response.json();
+        }
+
+        // 30m logic (unchanged, just use the original IDs)
+        async function updateCharts30m() {
+            try {
+                const data = await fetchData();
+                // Support both crypto and stock naming conventions
+                if (!data || !(data.djia || data.aapl || data.btc) || !(data.nasdaq || data.msft || data.eth) || !data.time) {
+                    console.error('Invalid data format received');
+                    return;
+                }
+                currentData = data;
+                plotMainChart(data);
+
+                // Get detrended data
+                try {
+                    const detrended = await fetch('/api/detrend', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            djia: data.djia || data.aapl || data.btc || [],
+                            nasdaq: data.nasdaq || data.msft || data.eth || []
+                        })
+                    }).then(async r => {
+                        if (!r.ok) throw new Error(await r.text());
+                        return r.json();
+                    });
+
+                    if (detrended && (detrended.djia_detrended || detrended.aapl_detrended || detrended.btc_detrended)) {
+                        plotDetrendedChart({...detrended, time: data.time}, 'detrended-chart-30m');
+
+                        // Calculate coherence only if we have detrended data
+                        try {
+                            const coherence = await fetch('/api/coherence', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({
+                                    djia: detrended.djia_detrended || detrended.aapl_detrended || detrended.btc_detrended || [],
+                                    nasdaq: detrended.nasdaq_detrended || detrended.msft_detrended || detrended.eth_detrended || []
+                                })
+                            }).then(async r => {
+                                if (!r.ok) throw new Error(await r.text());
+                                return r.json();
+                            });
+
+                            if (coherence && coherence.coherence) {
+                                plotCoherence(coherence, 'coherence-plot-30m');
+                            }
+                        } catch (e) {
+                            console.error('Coherence calculation failed:', e);
+                        }
+                    }
+                } catch (e) {
+                    console.error('Detrending failed:', e);
+                }
+            } catch (e) {
+                console.error('Update failed:', e);
+            }
+        }
+
+        // Markov chain generator for n points, with optional previous array
+        function generateMarkovChain(length = 1800, start = 100, volatility = 0.001, seed = 42, prev = null, n_new = 30) {
+            let rand = mulberry32(seed);
+            let prices;
+            if (prev && prev.length === length) {
+                // Shift left and append n_new new points
+                prices = prev.slice(n_new);
+                let last = prices.length > 0 ? prices[prices.length - 1] : start;
+                for (let i = 0; i < n_new; i++) {
+                    let change = randn_bm(rand) * volatility;
+                    last = Math.max(0.01, last * (1 + change));
+                    prices.push(last);
+                }
+            } else {
+                // Initialize full chain
+                prices = [start];
+                for (let i = 1; i < length; i++) {
+                    let change = randn_bm(rand) * volatility;
+                    let newPrice = Math.max(0.01, prices[i - 1] * (1 + change));
+                    prices.push(newPrice);
+                }
+            }
+            return prices;
+        }
+
+        // Deterministic seeded random number generator
+        function mulberry32(a) {
+            return function() {
+                var t = a += 0x6D2B79F5;
+                t = Math.imul(t ^ t >>> 15, t | 1);
+                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            }
+        }
+        // Normal distribution using Box-Muller
+        function randn_bm(rand) {
+            let u = 0, v = 0;
+            while(u === 0) u = rand();
+            while(v === 0) v = rand();
+            return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        }
+
+        // State for the 60s tab Markov chains
+        let markovA = null;
+        let markovB = null;
+
+        // 60s tab: 1800-point Markov, update every second, always percent change
+        function updateCharts60s() {
+            const n = 1800;
+            const n_new = 30;
+            // Use different seeds for independence
+            const seedA = Math.floor(Math.random() * 1e9);
+            const seedB = Math.floor(Math.random() * 1e9);
+            markovA = generateMarkovChain(n, 100, 0.001, seedA, markovA, n_new);
+            markovB = generateMarkovChain(n, 300, 0.001, seedB, markovB, n_new);
+
+            // Convert to percent change from first value
+            const baseA = markovA[0];
+            const baseB = markovB[0];
+            const a_pct = markovA.map(p => 100 * (p - baseA) / baseA);
+            const b_pct = markovB.map(p => 100 * (p - baseB) / baseB);
+
+            // Time axis: last 1800 seconds
+            const now = new Date();
+            const time = [];
+            for (let i = 0; i < n; i++) {
+                let t = new Date(now.getTime() - (n - 1 - i) * 1000);
+                time.push(t.toTimeString().slice(0, 8));
+            }
+
+            plotMainChart({
+                time: time,
+                aapl: a_pct,
+                msft: b_pct
+            }, 'live-chart-60s', 'Index A', 'Index B', 30);
+
+            fetch('/api/detrend', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    djia: a_pct,
+                    nasdaq: b_pct
+                })
+            })
+            .then(r => r.json())
+            .then(detrended => {
+                plotDetrendedChart({
+                    ...detrended,
+                    time: time
+                }, 'detrended-chart-60s', 'Index A', 'Index B');
+
+                // Coherence: pass sampling rate info for this tab
+                return fetch('/api/coherence', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        aapl: detrended.aapl_detrended,
+                        msft: detrended.msft_detrended,
+                        frame_rate: 30  // <-- Indicate 30 Hz sampling for this tab
+                    })
+                });
+            })
+            .then(r => r && r.json ? r.json() : r)
+            .then(coherence => {
+                if (coherence && coherence.coherence) {
+                    plotCoherence(coherence, 'coherence-plot-60s', 30);
+                }
+            });
+        }
+
+        // Modified plotting functions to accept custom names
+        function plotMainChart(data, chartId='live-chart-30m', name1='Index A', name2='Index B', samplingRate=1) {
+            // Support both crypto and stock naming conventions
+            const y1 = data.aapl || [];
+            const y2 = data.msft || [];
+            const trace1 = {
+                x: data.time,
+                y: y1,
+                type: 'scatter',
+                mode: 'lines',
+                line: { color: '#f28e2b', width: 3 },
+                name: name1
+            };
+            const trace2 = {
+                x: data.time,
+                y: y2,
+                type: 'scatter',
+                mode: 'lines',
+                line: { color: '#4e79a7', width: 3 },
+                name: name2
+            };
+            let yAll = y1.concat(y2);
+            let yMin = Math.min(...yAll);
+            let yMax = Math.max(...yAll);
+            let eps = 1e-6;
+            let yRange = [yMin - eps, yMax + eps];
+
+            // X axis: for 30Hz, show seconds
+            let xaxis;
+            if (samplingRate === 30) {
+                const n = data.time.length;
+                const totalSeconds = n / 30;
+                const xticks = [];
+                const xticktext = [];
+                for (let s = 0; s <= totalSeconds; s += 10) {
+                    xticks.push(s * 30);
+                    xticktext.push(s.toString());
+                }
+                xaxis = {
+                    title: "Time (seconds)",
+                    showgrid: true,
+                    gridcolor: "#444",
+                    tickvals: xticks,
+                    ticktext: xticktext,
+                    range: [0, n - 1]
+                };
+            } else {
+                xaxis = {
+                    title: "time",
+                    showgrid: true,
+                    gridcolor: "#444",
+                    tickmode: "auto",
+                    nticks: 8,
+                    range: [data.time[0], data.time[data.time.length - 1]]
+                };
+            }
+
+            // Y axis: only set special range for 60s tab, otherwise use default for 30m tab
+            let yaxis;
+            if (samplingRate === 30) {
+                yaxis = { title: "Relative Change (%)", showgrid: true, gridcolor: "#444", range: yRange, autorange: false };
+            } else {
+                yaxis = { title: "Relative Change (%)", showgrid: true, gridcolor: "#444", autorange: true };
+            }
+
+            const layout = {
+                plot_bgcolor: "#232323",
+                paper_bgcolor: "#232323",
+                font: { color: "#cccccc", family: "Segoe UI, Arial, sans-serif" },
+                xaxis: xaxis,
+                yaxis: yaxis,
+                legend: { orientation: "h", x: 0.5, xanchor: "center", y: 1.1 },
+                margin: { t: 40, l: 60, r: 30, b: 60 },
+                transition: { duration: 400, easing: "cubic-in-out" }
+            };
+            if (data.time && y1.length > 0 && y2.length > 0) {
+                Plotly.react(chartId, [trace1, trace2], layout, {responsive: true, displayModeBar: false});
+            } else {
+                Plotly.purge(chartId);
+            }
+        }
+
+        function plotDetrendedChart(data, chartId='detrended-chart-30m', name1='Index A', name2='Index B', samplingRate=1) {
+            // Support both crypto and stock naming conventions
+            const y1 = data.aapl_detrended || [];
+            const y2 = data.msft_detrended || [];
+            const traces = [{
+                x: data.time,
+                y: y1,
+                type: 'scatter',
+                mode: 'lines',
+                line: { color: '#f28e2b', width: 3 },
+                name: name1
+            }, {
+                x: data.time,
+                y: y2,
+                type: 'scatter',
+                mode: 'lines',
+                line: { color: '#4e79a7', width: 3 },
+                name: name2
+            }];
+
+            const layout = {
+                plot_bgcolor: "#232323",
+                paper_bgcolor: "#232323",
+                font: { color: "#cccccc" },
+                xaxis: { showgrid: false, visible: false },
+                yaxis: { showgrid: false, visible: false },
+                legend: { orientation: "h", y: 1.1 },
+                margin: { t: 40, l: 60, r: 30, b: 60 }
+            };
+
+            if (data.time && y1.length > 0 && y2.length > 0) {
+                Plotly.react(chartId, traces, layout, {responsive: true, displayModeBar: false});
+            } else {
+                Plotly.purge(chartId);
+            }
+        }
+
+        function plotCoherence(data, chartId='coherence-plot-30m', samplingRate=1) {
+            const nPeriods = data.periods.length;
+            const nTime = data.coherence[0]?.length || 0;
+            let xLabels = data.time;
+            if (xLabels.length !== nTime) {
+                xLabels = Array.from({length: nTime}, (_, i) => i);
+            }
+
+            // Set axis properties based on sampling rate
+            let xaxis = {
+                showgrid: false,
+                title: samplingRate === 30 ? "Time (seconds)" : "Time (seconds)",
+                range: [xLabels[0], xLabels[nTime - 1]]
+            };
+            
+            let yaxis, yticks;
+            
+            if (samplingRate === 30) {
+                // 60-second tab: periods from 0.5 to 15 seconds
+                yticks = [0.5, 1, 2, 3, 5, 7, 10, 12, 15];
+                yaxis = { 
+                    type: 'log',
+                    title: "Period (seconds)",
+                    autorange: false,
+                    range: [Math.log10(0.5), Math.log10(15)], 
+                    tickvals: yticks,
+                    ticktext: yticks.map(String)
+                };
+                
+                // X-axis ticks in seconds for 30Hz sampling
+                const totalSeconds = nTime / 30;
+                const xticks = [];
+                const xticktext = [];
+                for (let s = 0; s <= totalSeconds; s += 10) {
+                    xticks.push(s * 30);
+                    xticktext.push(s.toString());
+                }
+                xaxis.tickvals = xticks;
+                xaxis.ticktext = xticktext;
+            } else {
+                // 30-minute tab: periods from 40 to 500 seconds
+                yticks = [40, 50, 75, 100, 150, 200, 300, 400, 500];
+                const yticksInRange = yticks.filter(tick => tick >= Math.min(...data.periods) && tick <= Math.max(...data.periods));
+                yaxis = { 
+                    type: 'log',
+                    title: "Period (seconds)",
+                    autorange: true,
+                    tickvals: yticksInRange,
+                    ticktext: yticksInRange.map(String)
+                };
+            }
+
+            const trace = {
+                z: data.coherence,
+                x: xLabels,
+                y: data.periods,
+                type: 'heatmap',
+                colorscale: 'Jet',
+                zmin: 0,
+                zmax: 1
+            };
+
+            const layout = {
+                plot_bgcolor: "#232323",
+                paper_bgcolor: "#232323",
+                font: { color: "#cccccc" },
+                xaxis: xaxis,
+                yaxis: yaxis,
+                margin: { t: 40, l: 80, r: 30, b: 60 }
+            };
+
+            if (data.coherence && data.periods && data.coherence.length > 0 && data.periods.length > 0) {
+                Plotly.react(chartId, [trace], layout, {responsive: true, displayModeBar: false});
+            } else {
+                Plotly.purge(chartId);
+            }
+        }
+
+        // Tab switching logic and polling
+        let interval30m = null;
+        let interval60s = null;
+        document.addEventListener("DOMContentLoaded", function() {
+            updateCharts60s();
+            setInterval(updateCharts60s, 2000);  // Changed from 500 to 2000
+        });
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+
+
+</html>

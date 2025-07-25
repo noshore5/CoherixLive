@@ -14,3 +14,4 @@ matplotlib
 finnhub-python
 # ...add any other backend dependencies you use...
 websocket-client
+gunicorn

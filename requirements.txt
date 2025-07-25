@@ -6,6 +6,7 @@ scipy
 aiohttp
 websockets
 pydantic
+fcwt
 matplotlib
 # If you use Plotly on the backend (not required for frontend-only use)
 # plotly

@@ -1,11 +1,14 @@
 fastapi
 uvicorn
-aiohttp
 jinja2
 numpy
 scipy
-plotly
-fcwt
-matplotlib
+aiohttp
 websockets
-finnhub
+pydantic
+matplotlib
+# If you use Plotly on the backend (not required for frontend-only use)
+# plotly
+# If you use finnhub API
+finnhub-python
+# ...add any other backend dependencies you use...

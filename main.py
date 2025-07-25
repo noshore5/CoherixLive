@@ -132,8 +132,18 @@ async def detrend_data(data: DetrendRequest):
                 detail="Arrays must have same length"
             )
         
-        aapl_detrended = detrend(np.array(aapl, dtype=np.float64)).tolist()
-        msft_detrended = detrend(np.array(msft, dtype=np.float64)).tolist()
+        # The lag is likely caused by using scipy.signal.detrend on very large arrays (length 1800) every 2 seconds.
+        # If you want to speed this up, you can use numpy's polyfit for a linear detrend, which is much faster:
+        def fast_detrend(arr):
+            x = np.arange(len(arr))
+            p = np.polyfit(x, arr, 1)
+            trend = np.polyval(p, x)
+            return (arr - trend).tolist()
+
+        aapl_arr = np.array(aapl, dtype=np.float64)
+        msft_arr = np.array(msft, dtype=np.float64)
+        aapl_detrended = fast_detrend(aapl_arr)
+        msft_detrended = fast_detrend(msft_arr)
         
         return {
             "aapl_detrended": aapl_detrended,

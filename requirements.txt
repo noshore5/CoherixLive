@@ -13,3 +13,4 @@ matplotlib
 # If you use finnhub API
 finnhub-python
 # ...add any other backend dependencies you use...
+websocket-client

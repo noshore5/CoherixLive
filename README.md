@@ -1,6 +1,6 @@
 # CoherixLive
 
-This app provides a live market coherence chart using FastAPI and Plotly, fetching real-time data from Finnhub.
+This app provides a live market coherence chart using FastAPI and Plotly, fetching real-time data from (redacted).
 
 ## Setup
 

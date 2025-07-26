@@ -175,7 +175,7 @@ async def calculate_coherence(data: dict = Body(...)):
         aapl = data.get("aapl") or data.get("djia", [])
         msft = data.get("msft") or data.get("nasdaq", [])
         frame_rate = data.get("frame_rate", 1.0)
-        print(frame_rate)
+
         if frame_rate == 5:
             highest_freq = frame_rate/2  # Nyquist frequency = 2.5 Hz
             lowest_freq = 1/10   # 10 second period
@@ -205,7 +205,7 @@ async def calculate_coherence(data: dict = Body(...)):
         coeffs1, freqs = transform(aapl_arr, frame_rate, highest_freq, lowest_freq, nfreqs=nfreqs)
         coeffs2, _ = transform(msft_arr, frame_rate, highest_freq, lowest_freq, nfreqs=nfreqs)
         coh, freqs, cross = coherence(coeffs1, coeffs2, freqs)
-        print(coh.shape)
+
         periods = 1 / freqs
 
         # Replace NaN values with zeros

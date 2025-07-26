@@ -28,7 +28,7 @@ This app provides a live market coherence chart using FastAPI and Plotly, fetchi
 ## Directory Structure
 
 - `main.py` - FastAPI app entry point
-- `utils/binance_utils.py` - Binance data fetching utility
+- `utils/coherence_utils.py` - Computation made using fCWT
 - `templates/live_charts.html` - Main HTML template
 - `static/.keep` - Keeps the static directory in version control
 

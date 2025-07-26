@@ -65,7 +65,6 @@ def initialize_price_arrays(length=1800, start_aapl=150.0, start_msft=300.0):
     _aapl_prices = aapl
     _msft_prices = msft
     _price_arrays_initialized = True
-    print(f"[DEBUG] Initialized price arrays - AAPL: {_aapl_prices[0]:.2f} to {_aapl_prices[-1]:.2f}, MSFT: {_msft_prices[0]:.2f} to {_msft_prices[-1]:.2f}")
 
 def update_price_arrays(force_update=False):
     global _aapl_prices, _msft_prices, _last_update_time
@@ -76,9 +75,16 @@ def update_price_arrays(force_update=False):
         if time_since_update < 5:
             return False
 
-    # Simply rotate the arrays
-    _aapl_prices = _aapl_prices[1:] + [_aapl_prices[0]]
-    _msft_prices = _msft_prices[1:] + [_msft_prices[0]]
+    # Add new realistic data points using same random walk as initialization
+    aapl_change = _random_state.gauss(0, _volatility)
+    msft_change = _random_state.gauss(0, _volatility)
+    
+    new_aapl = max(0.01, _aapl_prices[-1] * (1 + aapl_change))
+    new_msft = max(0.01, _msft_prices[-1] * (1 + msft_change))
+    
+    # Shift arrays left and add new values
+    _aapl_prices = _aapl_prices[1:] + [new_aapl]
+    _msft_prices = _msft_prices[1:] + [new_msft]
     
     _last_update_time = current_time
     return True
@@ -96,17 +102,28 @@ async def live_data():
         initialize_price_arrays()
         _price_arrays_initialized = True
 
-    # Update the arrays (cycle through the pattern)
-    update_price_arrays()
+    # Update the arrays every call (not time-limited for 1-second updates)
+    update_price_arrays(force_update=True)
     
-    # Create time axis
+    # Create time axis - 5Hz sampling rate for last 60 seconds = 300 data points
+    last_300_points = 300
     now = datetime.now()
-    time_axis = [(now - timedelta(seconds=1799-i)).strftime("%H:%M:%S") for i in range(1800)]
+    time_axis = [(now - timedelta(seconds=(last_300_points-1-i)/5)).strftime("%H:%M:%S.%f")[:-3] for i in range(last_300_points)]
+    
+    # Get last 300 points
+    aapl_subset = _aapl_prices[-last_300_points:]
+    msft_subset = _msft_prices[-last_300_points:]
+    
+    # Convert to relative change from beginning of the 60-second window
+    aapl_base = aapl_subset[0]
+    msft_base = msft_subset[0]
+    aapl_relative = [100 * (p - aapl_base) / aapl_base for p in aapl_subset]
+    msft_relative = [100 * (p - msft_base) / msft_base for p in msft_subset]
     
     return {
         "time": time_axis,
-        "aapl": _aapl_prices,
-        "msft": _msft_prices
+        "aapl": aapl_relative,
+        "msft": msft_relative
     }
 
 class DetrendRequest(BaseModel):
@@ -114,11 +131,11 @@ class DetrendRequest(BaseModel):
     nasdaq: conlist(float, min_length=2)
 
 @app.post("/api/detrend")
-async def detrend_data(data: DetrendRequest):
+async def detrend_data(data: dict = Body(...)):
     try:
-        # Get arrays and ensure they exist
-        aapl = data.djia or data.aapl or []
-        msft = data.nasdaq or data.msft or []
+        # Get arrays and ensure they exist - handle both naming conventions
+        aapl = data.get("aapl") or data.get("djia", [])
+        msft = data.get("msft") or data.get("nasdaq", [])
         
         if len(aapl) == 0 or len(msft) == 0:
             return {
@@ -132,8 +149,6 @@ async def detrend_data(data: DetrendRequest):
                 detail="Arrays must have same length"
             )
         
-        # The lag is likely caused by using scipy.signal.detrend on very large arrays (length 1800) every 2 seconds.
-        # If you want to speed this up, you can use numpy's polyfit for a linear detrend, which is much faster:
         def fast_detrend(arr):
             x = np.arange(len(arr))
             p = np.polyfit(x, arr, 1)
@@ -160,15 +175,15 @@ async def calculate_coherence(data: dict = Body(...)):
         aapl = data.get("aapl") or data.get("djia", [])
         msft = data.get("msft") or data.get("nasdaq", [])
         frame_rate = data.get("frame_rate", 1.0)
-        
-        if frame_rate == 30:
-            highest_freq = frame_rate/2  # Nyquist frequency
-            lowest_freq = 1/15   # 15 second period
-            nfreqs = 200  # Higher resolution for high-frequency analysis
+        print(frame_rate)
+        if frame_rate == 5:
+            highest_freq = frame_rate/2  # Nyquist frequency = 2.5 Hz
+            lowest_freq = 1/10   # 10 second period
+            nfreqs = 100
         else:
             highest_freq = 1/40
             lowest_freq = 1/500
-            nfreqs = 200
+            nfreqs = 100
 
         if not isinstance(aapl, list) or not isinstance(msft, list):
             raise HTTPException(status_code=422, detail="Data must be lists")
@@ -187,10 +202,10 @@ async def calculate_coherence(data: dict = Body(...)):
                 "phase": [[0.0]]
             }
         
-        print(f'[DEBUG] Frame rate: {frame_rate}, Highest freq: {highest_freq}, Lowest freq: {lowest_freq}')
         coeffs1, freqs = transform(aapl_arr, frame_rate, highest_freq, lowest_freq, nfreqs=nfreqs)
         coeffs2, _ = transform(msft_arr, frame_rate, highest_freq, lowest_freq, nfreqs=nfreqs)
         coh, freqs, cross = coherence(coeffs1, coeffs2, freqs)
+        print(coh.shape)
         periods = 1 / freqs
 
         # Replace NaN values with zeros
@@ -210,7 +225,6 @@ async def calculate_coherence(data: dict = Body(...)):
             "phase": np.angle(cross).tolist()
         }
     except Exception as e:
-        print(f"Coherence error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.websocket("/ws/finnhub")
@@ -218,56 +232,6 @@ async def websocket_finnhub(websocket: WebSocket):
     await websocket.accept()
     async for data in connect_finnhub_websocket():
         await websocket.send_json(data)
-
-# State for high-frequency Markov chains
-_hf_price_means = {'A': 100.0, 'B': 100.0}
-_hf_prices_a = None
-_hf_prices_b = None
-_hf_volatility = 0.0003
-_hf_mean_reversion = 0.05
-
-@app.get("/api/hf-data")
-async def get_hf_data():
-    global _hf_prices_a, _hf_prices_b
-    
-    # Initialize if needed
-    if _hf_prices_a is None or _hf_prices_b is None:
-        _hf_prices_a = [_hf_price_means['A']] * 1800
-        _hf_prices_b = [_hf_price_means['B']] * 1800
-
-    # Generate new prices with mean reversion
-    def update_prices(prices, mean):
-        prices = prices[30:]  # Remove oldest 30 points
-        current = prices[-1]
-        new_prices = []
-        for _ in range(30):
-            mean_force = _hf_mean_reversion * (mean - current)
-            random_walk = random.gauss(0, _hf_volatility)
-            jump = random.uniform(-0.05, 0.05)
-            current = current * (1 + mean_force + random_walk + jump)
-            current = max(0.01, current)
-            new_prices.append(current)
-        return prices + new_prices
-
-    # Update both price series
-    _hf_prices_a = update_prices(_hf_prices_a, _hf_price_means['A'])
-    _hf_prices_b = update_prices(_hf_prices_b, _hf_price_means['B'])
-
-    # Convert to percent change
-    base_a = _hf_prices_a[0]
-    base_b = _hf_prices_b[0]
-    pct_a = [(p - base_a) / base_a * 100 for p in _hf_prices_a]
-    pct_b = [(p - base_b) / base_b * 100 for p in _hf_prices_b]
-
-    # Generate time axis
-    now = datetime.now()
-    time_axis = [(now - timedelta(seconds=1799-i)).strftime("%H:%M:%S") for i in range(1800)]
-
-    return {
-        "time": time_axis,
-        "aapl": pct_a,
-        "msft": pct_b
-    }
 
 def generate_markov_chain(length=1800, start=100.0, prev_series=None, volatility=0.001, seed=None):
     """
@@ -295,5 +259,7 @@ def generate_markov_chain(length=1800, start=100.0, prev_series=None, volatility
     # ...existing code for base and pct_changes if needed...
     return prices
 
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+

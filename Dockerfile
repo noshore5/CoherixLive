@@ -32,3 +32,9 @@ EXPOSE 8000
 # Start FastAPI with gunicorn and multiple uvicorn workers for better performance
 CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "0.0.0.0:8000", "--workers", "2"]
 
+# Build the Docker image
+# docker build -t coherixlive .
+
+# Run the Docker container, mapping port 8000
+# docker run -p 8000:8000 coherixlive
+

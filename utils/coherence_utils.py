@@ -22,12 +22,11 @@ def transform(signal1, frame_rate, highest, lowest, nfreqs=100):
     signal1 = np.asarray(signal1, dtype=np.float64)
     
     # If sampling rate is high (60s tab), use higher frequency range
-    if frame_rate >= 30:
-        # For 30Hz sampling, use periods 1-15 seconds
-        lowest = float(1/15.0)  # longest period = 15 seconds
-        highest = float(2)    # shortest period = 1 second
+    if frame_rate >= 5:
+        # For 5Hz sampling, use periods 0.1-10 seconds
+        lowest = float(1/10.0)  # longest period = 10 seconds
+        highest = float(1/0.4)  # shortest period = 0.1 seconds
     else:
-        print(f'[DEBUG] Frame rate: {frame_rate}')
         # For 1Hz sampling (30m tab), use periods 40-500 seconds
         lowest = .002  # longest period = 500 seconds
         highest = .025 # shortest period = 40 seconds
@@ -35,5 +34,4 @@ def transform(signal1, frame_rate, highest, lowest, nfreqs=100):
 
     freqs, coeffs1 = fcwt.cwt(signal1, frame_rate, lowest, highest, nfreqs, 
                              nthreads=4, scaling='log')
-    print(f'[DEBUG] Transforming signal with frame_rate={frame_rate}')
     return coeffs1, freqs

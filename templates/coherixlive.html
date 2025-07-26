@@ -142,72 +142,63 @@
         let markovA = null;
         let markovB = null;
 
-        // 60s tab: 1800-point Markov, update every second, always percent change
-        function updateCharts60s() {
-            const n = 1800;
-            const n_new = 30;
-            // Use different seeds for independence
-            const seedA = Math.floor(Math.random() * 1e9);
-            const seedB = Math.floor(Math.random() * 1e9);
-            markovA = generateMarkovChain(n, 100, 0.001, seedA, markovA, n_new);
-            markovB = generateMarkovChain(n, 300, 0.001, seedB, markovB, n_new);
+        // 60s tab: Use backend data instead of client-side Markov generation
+        async function updateCharts60s() {
+            console.log('[DEBUG] updateCharts60s called');
+            try {
+                console.log('[DEBUG] Fetching from /api/live-data');
+                const response = await fetch('/api/live-data');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                console.log('[DEBUG] Received data:', data.aapl?.length, 'points');
 
-            // Convert to percent change from first value
-            const baseA = markovA[0];
-            const baseB = markovB[0];
-            const a_pct = markovA.map(p => 100 * (p - baseA) / baseA);
-            const b_pct = markovB.map(p => 100 * (p - baseB) / baseB);
+                plotMainChart({
+                    time: data.time,
+                    aapl: data.aapl,
+                    msft: data.msft
+                }, 'live-chart-60s', 'Index A', 'Index B', 5);  // Changed from 10 to 5
 
-            // Time axis: last 1800 seconds
-            const now = new Date();
-            const time = [];
-            for (let i = 0; i < n; i++) {
-                let t = new Date(now.getTime() - (n - 1 - i) * 1000);
-                time.push(t.toTimeString().slice(0, 8));
-            }
-
-            plotMainChart({
-                time: time,
-                aapl: a_pct,
-                msft: b_pct
-            }, 'live-chart-60s', 'Index A', 'Index B', 30);
-
-            fetch('/api/detrend', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    djia: a_pct,
-                    nasdaq: b_pct
-                })
-            })
-            .then(r => r.json())
-            .then(detrended => {
-                plotDetrendedChart({
-                    ...detrended,
-                    time: time
-                }, 'detrended-chart-60s', 'Index A', 'Index B');
-
-                // Coherence: pass sampling rate info for this tab
-                return fetch('/api/coherence', {
+                fetch('/api/detrend', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
-                        aapl: detrended.aapl_detrended,
-                        msft: detrended.msft_detrended,
-                        frame_rate: 30  // <-- Indicate 30 Hz sampling for this tab
+                        aapl: data.aapl,
+                        msft: data.msft
                     })
+                })
+                .then(r => r.json())
+                .then(detrended => {
+                    plotDetrendedChart({
+                        ...detrended,
+                        time: data.time
+                    }, 'detrended-chart-60s', 'Index A', 'Index B', 5);  // Changed from 10 to 5
+
+                    return fetch('/api/coherence', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            aapl: detrended.aapl_detrended,
+                            msft: detrended.msft_detrended,
+                            frame_rate: 5  // This should be 5, not 10
+                        })
+                    });
+                })
+                .then(r => r && r.json ? r.json() : r)
+                .then(coherence => {
+                    if (coherence && coherence.coherence) {
+                        plotCoherence(coherence, 'coherence-plot-60s', 5);  // Changed from 10 to 5
+                    }
                 });
-            })
-            .then(r => r && r.json ? r.json() : r)
-            .then(coherence => {
-                if (coherence && coherence.coherence) {
-                    plotCoherence(coherence, 'coherence-plot-60s', 30);
-                }
-            });
+            } catch (e) {
+                console.error('Error updating charts:', e);
+                console.error('Full error details:', e.message, e.stack);
+            }
         }
 
         // Modified plotting functions to accept custom names
-        function plotMainChart(data, chartId='live-chart-30m', name1='Index A', name2='Index B', samplingRate=1) {
+        function plotMainChart(data, chartId='live-chart-60s', name1='Index A', name2='Index B', samplingRate=5) {  // Changed default from 10 to 5
             // Support both crypto and stock naming conventions
             const y1 = data.aapl || [];
             const y2 = data.msft || [];
@@ -233,15 +224,15 @@
             let eps = 1e-6;
             let yRange = [yMin - eps, yMax + eps];
 
-            // X axis: for 30Hz, show seconds
+            // X axis: for 10Hz, show seconds
             let xaxis;
-            if (samplingRate === 30) {
+            if (samplingRate === 5) {  // Changed from 10 to 5
                 const n = data.time.length;
-                const totalSeconds = n / 30;
+                const totalSeconds = n / 5; // Changed from 10 to 5
                 const xticks = [];
                 const xticktext = [];
-                for (let s = 0; s <= totalSeconds; s += 10) {
-                    xticks.push(s * 30);
+                for (let s = 0; s <= totalSeconds; s += 12) { // Adjusted spacing for 5Hz
+                    xticks.push(s * 5); // Changed from 10 to 5
                     xticktext.push(s.toString());
                 }
                 xaxis = {
@@ -288,7 +279,7 @@
             }
         }
 
-        function plotDetrendedChart(data, chartId='detrended-chart-30m', name1='Index A', name2='Index B', samplingRate=1) {
+        function plotDetrendedChart(data, chartId='detrended-chart-60s', name1='Index A', name2='Index B', samplingRate=5) {  // Changed default from 10 to 5
             // Support both crypto and stock naming conventions
             const y1 = data.aapl_detrended || [];
             const y2 = data.msft_detrended || [];
@@ -325,7 +316,7 @@
             }
         }
 
-        function plotCoherence(data, chartId='coherence-plot-30m', samplingRate=1) {
+        function plotCoherence(data, chartId='coherence-plot-60s', samplingRate=5) {
             const nPeriods = data.periods.length;
             const nTime = data.coherence[0]?.length || 0;
             let xLabels = data.time;
@@ -336,30 +327,30 @@
             // Set axis properties based on sampling rate
             let xaxis = {
                 showgrid: false,
-                title: samplingRate === 30 ? "Time (seconds)" : "Time (seconds)",
+                title: samplingRate === 5 ? "Time (seconds)" : "Time (seconds)",
                 range: [xLabels[0], xLabels[nTime - 1]]
             };
             
             let yaxis, yticks;
             
-            if (samplingRate === 30) {
-                // 60-second tab: periods from 0.5 to 15 seconds
-                yticks = [0.5, 1, 2, 3, 5, 7, 10, 12, 15];
+            if (samplingRate === 5) {
+                // Y-axis: periods from 0.4 to 10 seconds (based on actual data extent)
+                yticks = [0.4, 0.5, 1, 2, 3, 5, 7, 10];
                 yaxis = { 
                     type: 'log',
                     title: "Period (seconds)",
                     autorange: false,
-                    range: [Math.log10(0.5), Math.log10(15)], 
+                    range: [Math.log10(0.4), Math.log10(10)], 
                     tickvals: yticks,
                     ticktext: yticks.map(String)
                 };
                 
-                // X-axis ticks in seconds for 30Hz sampling
-                const totalSeconds = nTime / 30;
+                // X-axis ticks in seconds for 5Hz sampling
+                const totalSeconds = nTime / 5; // Changed from 10 to 5
                 const xticks = [];
                 const xticktext = [];
-                for (let s = 0; s <= totalSeconds; s += 10) {
-                    xticks.push(s * 30);
+                for (let s = 0; s <= totalSeconds; s += 12) { // Adjusted spacing for 5Hz
+                    xticks.push(s * 5); // Changed from 10 to 5
                     xticktext.push(s.toString());
                 }
                 xaxis.tickvals = xticks;
@@ -387,6 +378,78 @@
                 zmax: 1
             };
 
+            // Add phase arrows overlay only in bright regions and within cone of influence
+            const arrowX = [];
+            const arrowY = [];
+            const arrowAngles = [];
+            const threshold = 0.6; // Only show arrows where coherence > 0.6
+            const skipX = 8; // Sample every 8th time point (less dense)
+            const skipY = 4; // Sample every 4th frequency (less dense)
+
+            for (let i = 0; i < data.coherence.length; i += skipY) {
+                for (let j = 0; j < data.coherence[i].length; j += skipX) {
+                    if (data.coherence[i][j] > threshold) {
+                        // Check if within cone of influence
+                        const timeIndex = j;
+                        const period = data.periods[i];
+                        const distFromEdge = Math.min(timeIndex, data.coherence[0].length - 1 - timeIndex);
+                        const maxReliablePeriod = distFromEdge / samplingRate;
+                        
+                        // Only add arrow if within cone of influence
+                        if (period <= maxReliablePeriod) {
+                            const angle = data.phase[i][j]; // Use phase from cross object
+                            arrowX.push(xLabels[j]);
+                            arrowY.push(period);
+                            arrowAngles.push(angle * 180 / Math.PI); // Convert to degrees for Plotly
+                        }
+                    }
+                }
+            }
+
+            const phaseTrace = {
+                x: arrowX,
+                y: arrowY,
+                type: 'scatter',
+                mode: 'markers',
+                marker: {
+                    symbol: 'arrow',
+                    size: 12, // Bigger arrows
+                    color: 'white',
+                    line: { color: 'black', width: 1 },
+                    angle: arrowAngles // Set arrow angles to match phase
+                },
+                showlegend: false
+            };
+
+            // Add cone of influence
+            const coiX = [];
+            const coiY = [];
+            const dataLength = xLabels.length;
+            
+            // Create cone of influence boundary
+            for (let i = 0; i < dataLength; i++) {
+                const distFromEdge = Math.min(i, dataLength - 1 - i);
+                const maxPeriod = distFromEdge / samplingRate; // Max reliable period at this time
+                if (maxPeriod >= Math.min(...data.periods) && maxPeriod <= Math.max(...data.periods)) {
+                    coiX.push(xLabels[i]);
+                    coiY.push(maxPeriod);
+                }
+            }
+
+            const coiTrace = {
+                x: coiX,
+                y: coiY,
+                type: 'scatter',
+                mode: 'lines',
+                line: { 
+                    color: 'white', 
+                    width: 2, 
+                    dash: 'dash' 
+                },
+                name: 'Cone of Influence',
+                showlegend: false
+            };
+
             const layout = {
                 plot_bgcolor: "#232323",
                 paper_bgcolor: "#232323",
@@ -397,7 +460,7 @@
             };
 
             if (data.coherence && data.periods && data.coherence.length > 0 && data.periods.length > 0) {
-                Plotly.react(chartId, [trace], layout, {responsive: true, displayModeBar: false});
+                Plotly.react(chartId, [trace, phaseTrace, coiTrace], layout, {responsive: true, displayModeBar: false});
             } else {
                 Plotly.purge(chartId);
             }
@@ -408,11 +471,9 @@
         let interval60s = null;
         document.addEventListener("DOMContentLoaded", function() {
             updateCharts60s();
-            setInterval(updateCharts60s, 5000);  // Changed from 500 to 2000
+            setInterval(updateCharts60s, 500);  // Changed from 1000 to 500 (2 times/second)
         });
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
-
-
 </html>

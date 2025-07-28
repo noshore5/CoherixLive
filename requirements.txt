@@ -4,14 +4,11 @@ jinja2
 numpy
 scipy
 aiohttp
-websockets
 pydantic
 fcwt
 matplotlib
 # If you use Plotly on the backend (not required for frontend-only use)
 # plotly
 # If you use finnhub API
-finnhub-python
 # ...add any other backend dependencies you use...
-websocket-client
 gunicorn

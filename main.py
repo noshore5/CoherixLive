@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Query, HTTPException, Body, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, Query, HTTPException, Body
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -7,13 +7,11 @@ from typing import List
 import numpy as np
 import uvicorn
 from scipy.signal import detrend
-import aiohttp
 import asyncio
 from datetime import datetime, timedelta
 import random
 
 from utils.coherence_utils import coherence, transform
-from utils.finnhub_utils import get_historical_data, start_live_price_updates, get_live_price_array
 
 app = FastAPI()
 
@@ -26,10 +24,6 @@ templates = Jinja2Templates(directory="templates")
 async def index(request: Request):
     return templates.TemplateResponse("coherixlive.html", {"request": request})
 
-@app.on_event("startup")
-async def startup_event():
-    # Start live price updates for AAPL and MSFT at app startup
-    start_live_price_updates(['AAPL', 'MSFT'])
 
 # State variables for price arrays
 _price_arrays_initialized = False
@@ -227,11 +221,6 @@ async def calculate_coherence(data: dict = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.websocket("/ws/finnhub")
-async def websocket_finnhub(websocket: WebSocket):
-    await websocket.accept()
-    async for data in connect_finnhub_websocket():
-        await websocket.send_json(data)
 
 def generate_markov_chain(length=1800, start=100.0, prev_series=None, volatility=0.001, seed=None):
     """
@@ -261,5 +250,5 @@ def generate_markov_chain(length=1800, start=100.0, prev_series=None, volatility
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000)
 

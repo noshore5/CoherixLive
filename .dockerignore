@@ -1,0 +1,11 @@
+chxlv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.git
+.gitignore
+.DS_Store
+*.log
